@@ -29,28 +29,26 @@ type ColorText struct {
 	color string
 }
 
-type Result struct {
+type Message struct {
 	texts []ColorText
 }
 
-func createResult(texts ...string) Result {
+func createMessage(texts ...string) Message {
 	var _texts []ColorText
 	for _, t := range texts {
 		_texts = append(_texts, ColorText{text: t})
 	}
-	return Result{texts: _texts}
+	return Message{texts: _texts}
 }
 
-func consumeCommands(actions map[string]func(string, chan<- Result), cc <-chan Command, rc chan<- Result) {
+func consumeCommands(actions map[string]func(string, chan<- Message), cc <-chan Command, mc chan<- Message) {
 	for {
 		for c := range cc {
-			var result Result
 			action, argument := c.ParseCommand()
 			if actionFunction, ok := actions[action]; ok {
-				go actionFunction(argument, rc)
+				go actionFunction(argument, mc)
 			} else {
-				result = createResult("Invalid Command")
-				rc <- result
+				mc <- createMessage("Invalid Command")
 			}
 		}
 	}
@@ -63,11 +61,11 @@ func main() {
 	cc := make(chan Command, 1)
 	chatInputUI := createChatInputUI(cc)
 
-	rc := make(chan Result, 1)
-	chatLogUI := createChatLogUI(rc)
+	mc := make(chan Message, 1)
+	chatLogUI := createChatLogUI(mc)
 
 	actions := createActions()
-	go consumeCommands(actions, cc, rc)
+	go consumeCommands(actions, cc, mc)
 
 	cc <- Command{"/_init"}
 

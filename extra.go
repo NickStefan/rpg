@@ -55,16 +55,16 @@ func createWrapped() *text.Text {
 }
 
 // ChatLogUI widget
-func createChatLogUI(rc <-chan Result) *text.Text {
+func createChatLogUI(mc <-chan Message) *text.Text {
 	rolled, err := text.New(text.RollContent(), text.WrapAtWords())
 	if err != nil {
 		panic(err)
 	}
 	go func() {
 		for {
-			for r := range rc {
+			for m := range mc {
 				var err error
-				for _, txt := range r.texts {
+				for _, txt := range m.texts {
 					if txt.text != "" {
 						err = rolled.Write(txt.text)
 					}
