@@ -1,6 +1,7 @@
 package main
 
 import "time"
+import "strings"
 
 type Actions struct {
 	user map[string]func(string, *Game, chan<- Message)
@@ -10,8 +11,10 @@ type Actions struct {
 func createActions() Actions {
 	actions := Actions{
 		game: map[string]func(string, *Game, chan<- Message){
-			"/init": actionInit,
-			"/find": actionFind,
+			"/init":        actionInit,
+			"/find":        actionFind,
+			"/attackByNPC": actionAttackByNPC,
+			"/deathByNPC":  actionDeathByNPC,
 		},
 		user: map[string]func(string, *Game, chan<- Message){
 			"/start":     actionStart,
@@ -70,6 +73,10 @@ func actionStart(arg string, game *Game, mc chan<- Message) {
 func actionFind(arg string, game *Game, mc chan<- Message) {
 	if item, ok := game.GetItem(game.playerLoc, arg); ok {
 		mc <- createMessage("You find a [" + item.name + "].")
+
+	} else if npc, ok := game.GetNPC(game.playerLoc, arg); ok {
+		mc <- createMessage("Just ahead, you see a [" + npc.name + "]. You might need to /inspect it to be sure.")
+
 	} else {
 		mc <- createMessage("You find nothing.")
 	}
@@ -78,6 +85,8 @@ func actionFind(arg string, game *Game, mc chan<- Message) {
 func actionInspect(arg string, game *Game, mc chan<- Message) {
 	if item, ok := game.GetItem(game.playerLoc, arg); ok {
 		mc <- createMessage("You inspect the " + arg + ". " + item.description)
+	} else if npc, ok := game.GetNPC(game.playerLoc, arg); ok {
+		mc <- createMessage("You consider the " + arg + ". " + npc.description)
 	} else {
 		mc <- createMessage("There isn't anything by that name here. Maybe it's gone?")
 	}
@@ -92,6 +101,13 @@ func actionTake(arg string, game *Game, mc chan<- Message) {
 	} else if err == NOTFOUND {
 		mc <- createMessage("There isn't anything by that name here. Maybe it's gone?")
 	}
+
+	game.AddNPC(2, NPC{
+		name:         "invading warrior",
+		description:  "He looks dangerous and will attack any second.",
+		weaponDamage: 30,
+	})
+	game.playerLoc++
 }
 
 func actionInventory(arg string, game *Game, mc chan<- Message) {
@@ -100,6 +116,18 @@ func actionInventory(arg string, game *Game, mc chan<- Message) {
 	} else {
 		mc <- createMessage("There isn't anything by that name here. Maybe it's gone?")
 	}
+}
+
+func actionAttackByNPC(arg string, game *Game, mc chan<- Message) {
+	splitString := strings.SplitN(arg, " ", 2)
+	dmg, name := splitString[0], splitString[1]
+	mc <- createMessage("A " + name + " hits your for " + dmg + " damage.")
+}
+
+func actionDeathByNPC(arg string, game *Game, mc chan<- Message) {
+	splitString := strings.SplitN(arg, " ", 2)
+	dmg, name := splitString[0], splitString[1]
+	mc <- createMessage("A " + name + " hits your for " + dmg + " damage AND KILLS YOU.")
 }
 
 func actionEcho(arg string, game *Game, mc chan<- Message) {
