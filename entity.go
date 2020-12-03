@@ -1,47 +1,77 @@
 package main
 
-import "strconv"
-
-type LocatedEntity struct {
-	name        string
-	description string
-	xLoc        int
-	yLoc        int
-	command     string
+type Game struct {
+	playerLoc               int
+	playerInventory         map[string]Item
+	playerInventoryCapacity int
+	itemsByLoc              map[int][]Item
 }
 
-func (e LocatedEntity) Loc() string {
-	return "x" + strconv.Itoa(e.xLoc) + ", y" + strconv.Itoa(e.yLoc)
+func (g *Game) CheckTriggers(cc chan<- Command) {
+	if itemsAtLoc, ok := g.itemsByLoc[g.playerLoc]; ok {
+		for i, _ := range itemsAtLoc {
+			if itemsAtLoc[i].IsFound == false {
+				go func(i int) {
+					cc <- itemsAtLoc[i].Find()
+				}(i)
+			}
+		}
+	}
 }
 
-func (e LocatedEntity) Name() string {
-	return e.name
+func (g *Game) AddItem(loc int, item Item) {
+	g.itemsByLoc[loc] = append(g.itemsByLoc[loc], item)
 }
 
-type Character struct {
-	health    int
-	maxHealth int
-	inventory []Item
-	LocatedEntity
+func (g *Game) GetItem(loc int, name string) (item Item, ok bool) {
+	for _, item := range g.itemsByLoc[loc] {
+		if item.name == name {
+			return item, true
+		}
+	}
+	return Item{}, false
+}
+
+func (g *Game) GetInventoryItem(name string) (item Item, ok bool) {
+	item, ok = g.playerInventory[name]
+	return item, ok
+}
+
+func (g *Game) deleteItem(loc int, name string) {
+	var newItems []Item
+	for _, item := range g.itemsByLoc[loc] {
+		if item.name != name {
+			newItems = append(newItems, item)
+		}
+	}
+	g.itemsByLoc[loc] = newItems
+}
+
+const CAPACITY = "CAPACITY"
+const NOTFOUND = "NOTFOUND"
+
+func (g *Game) TakeItem(name string) (ok bool, err string) {
+	if item, _ok := g.GetItem(g.playerLoc, name); _ok {
+		if g.playerInventoryCapacity < len(g.playerInventory)+1 {
+			ok, err = false, CAPACITY
+		} else {
+			g.playerInventory[name] = item
+			ok = true
+			g.deleteItem(g.playerLoc, name)
+		}
+	} else {
+		ok, err = false, NOTFOUND
+	}
+	return
 }
 
 type Item struct {
-	LocatedEntity
+	name        string
+	description string
+	IsFound     bool
 }
 
-type Zone struct {
-	minX     int
-	maxX     int
-	minY     int
-	maxY     int
-	npcLocs  map[string]map[string]Character
-	itemLocs map[string]map[string]Item
-}
-
-func (z *Zone) addNpc(c Character) {
-	z.npcLocs[c.Loc()][c.Name()] = c
-}
-
-func (z *Zone) addItem(i Item) {
-	z.itemLocs[i.Loc()][i.Name()] = i
+func (item *Item) Find() Command {
+	item.IsFound = true
+	return Command{text: "/find " + item.name, origin: GAME}
 }
