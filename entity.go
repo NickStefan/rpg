@@ -1,6 +1,7 @@
 package main
 
 import "fmt"
+import "time"
 
 type Game struct {
 	playerLoc               int
@@ -9,6 +10,21 @@ type Game struct {
 	itemsByLoc              map[int][]Item
 	npcsByLoc               map[int][]NPC
 	playerHealth            int
+}
+
+func (g *Game) Spawn() {
+	g.AddItem(0, Item{
+		name:        "roll of burned bandages",
+		description: "They appear to be wrapped around several bottles--like a makeshift pack--probably tonics and salves meant for healing. Probably.",
+	})
+	g.AddItem(0, Item{
+		name:        "blackened sword",
+		description: "It appears to be burned--and dull. It'll be heavy to carry, but also heavy to receive a blow from--perfect for protecting oneself on hostile roads.",
+	})
+	g.AddItem(0, Item{
+		name:        "indecipherable book",
+		description: "The words are pronounceable--maybe. It's some language you aren't familiar with. Seems impracticle to take with you, but maybe it's valuable. Maybe.",
+	})
 }
 
 func (g *Game) CheckTriggers(cc chan<- Command) {
@@ -119,13 +135,8 @@ type NPC struct {
 
 func (npc *NPC) Find() Command {
 	npc.IsFound = true
-	// Here is the bug
-	// you set the IsAttacking at some future point
-	// but unless there is another command then, there is nothing checking
-	// need to either decouple the game state check from the command loop
-	// or heartbeat a command every few seconds
 	go func() {
-		pacing(7)
+		time.Sleep(6 * time.Second)
 		npc.IsAttacking = true
 	}()
 	return Command{text: "/find " + npc.name, origin: GAME}

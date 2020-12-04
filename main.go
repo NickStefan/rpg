@@ -8,26 +8,33 @@ func gameLoop(game *Game, actions Actions, cc chan Command, mc chan<- Message) {
 		select {
 		case c := <-cc:
 			action, argument := c.Parse()
-			switch c.origin {
-			case USER:
-				if actionFunction, ok := actions.user[action]; ok {
-					actionFunction(argument, game, mc)
-				} else {
-					mc <- createMessage("Invalid Command")
-				}
-			case GAME:
-				if actionFunction, ok := actions.game[action]; ok {
-					actionFunction(argument, game, mc)
-				} else {
-					mc <- createMessage("Invalid Command")
-				}
-			default:
-				mc <- createMessage("Invalid Command: Missing Origin")
+			if actionFunction, ok := actions.user[action]; ok {
+				actionFunction(argument, game, mc)
+			} else {
+				mc <- createMessage("Invalid Command")
 			}
 		case <-ticker.C:
 			game.CheckTriggers(cc)
 		}
 	}
+}
+
+func tellStory(mc chan<- Message) {
+	time.Sleep(2 * time.Second)
+	mc <- createMessage(
+		"Where there was once a house, there is now nothing.",
+	)
+	time.Sleep(6 * time.Second)
+	mc <- createMessage(
+		"Where there was once wood, there is now only charcoal glowing orange in the night.",
+	)
+	time.Sleep(10 * time.Second)
+	mc <- createMessage(
+		"You can still hear the clanking of swords, the howling of invaders some ways away. ",
+		"If you move quickly, you might make it to the gatehouse and safety inside the castle. ",
+		"If not, the invaders will be back shortly to take prisoners...\n",
+	)
+	time.Sleep(20 * time.Second)
 }
 
 func main() {
@@ -43,9 +50,10 @@ func main() {
 		npcsByLoc:               make(map[int][]NPC),
 	}
 	actions := createActions()
-	//go consumeCommands(actions, cc, game, mc)
 	go gameLoop(game, actions, cc, mc)
-	cc <- Command{"/init", GAME}
-
+	go func() {
+		tellStory(mc)
+		game.Spawn()
+	}()
 	createUI(cc, mc)
 }
