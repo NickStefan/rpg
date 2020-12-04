@@ -14,7 +14,10 @@ func gameLoop(game *Game, actions Actions, cc chan Command, mc chan<- Message) {
 				mc <- createMessage("Invalid Command")
 			}
 		case <-ticker.C:
-			game.CheckTriggers(cc)
+			game.Tick(cc, mc)
+			if game.playerHealth <= 0 {
+				return
+			}
 		}
 	}
 }
@@ -30,11 +33,11 @@ func tellStory(mc chan<- Message) {
 	)
 	time.Sleep(10 * time.Second)
 	mc <- createMessage(
-		"You can still hear the clanking of swords, the howling of invaders some ways away. ",
-		"If you move quickly, you might make it to the gatehouse and safety inside the castle. ",
+		"You can still hear the clanking of swords, the howling of invaders somewhere near. ",
+		"If you move quickly, you might make it to the gatehouse and to safety inside of the castle. ",
 		"If not, the invaders will be back shortly to take prisoners...\n",
 	)
-	time.Sleep(20 * time.Second)
+	time.Sleep(17 * time.Second)
 }
 
 func main() {
@@ -48,6 +51,7 @@ func main() {
 		playerInventory:         make(map[string]Item),
 		itemsByLoc:              make(map[int][]Item),
 		npcsByLoc:               make(map[int][]NPC),
+		messagesByLoc:           make(map[int][]Message),
 	}
 	actions := createActions()
 	go gameLoop(game, actions, cc, mc)

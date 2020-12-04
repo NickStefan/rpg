@@ -1,15 +1,27 @@
 package main
 
 import "fmt"
-import "time"
+import "math/rand"
+
+type Item struct {
+	name        string
+	description string
+	IsFound     bool
+}
 
 type Game struct {
+	playerHealth            int
 	playerLoc               int
-	playerInventory         map[string]Item
 	playerInventoryCapacity int
+	playerInventory         map[string]Item
+	playerWeaponDamage      int
+	playerWeaponDelay       int
+	playerWeaponDelayTimer  int
+	playerIsAttacking       bool
+	playerTarget            *NPC
 	itemsByLoc              map[int][]Item
 	npcsByLoc               map[int][]NPC
-	playerHealth            int
+	messagesByLoc           map[int][]Message
 }
 
 func (g *Game) Spawn() {
@@ -25,37 +37,83 @@ func (g *Game) Spawn() {
 		name:        "indecipherable book",
 		description: "The words are pronounceable--maybe. It's some language you aren't familiar with. Seems impracticle to take with you, but maybe it's valuable. Maybe.",
 	})
+	g.AddMessage(0, createMessage("Use '/inspect [item]' to look closer."))
+	g.AddMessage(0, createMessage("Use '/take [item]' to take one--and at most one. Time is short."))
+
+	g.AddNPC(1, NPC{
+		name:         "invading warrior",
+		description:  "He looks dangerous and will attack any second.",
+		aggroDelay:   3,
+		weaponDamage: 10,
+		weaponDelay:  3,
+		health:       30,
+	})
+	g.AddMessage(1, createMessage("Use '/consider [name]' to look closer."))
+	g.AddMessage(1, createMessage("Use '/attack [name]' to attack."))
+
+	g.AddMessage(2, createMessage("\nYou've reached the gatehouse! Congratulations! Press Q to quit."))
 }
 
-func (g *Game) CheckTriggers(cc chan<- Command) {
+func (g *Game) Tick(cc chan<- Command, mc chan<- Message) {
 	if itemsAtLoc, ok := g.itemsByLoc[g.playerLoc]; ok {
 		for i, _ := range itemsAtLoc {
 			if itemsAtLoc[i].IsFound == false {
-				go func(i int) {
-					cc <- itemsAtLoc[i].Find()
-				}(i)
+				itemsAtLoc[i].IsFound = true
+				mc <- createMessage("You find a [" + itemsAtLoc[i].name + "].")
 			}
 		}
 	}
 	if npcsAtLoc, ok := g.npcsByLoc[g.playerLoc]; ok {
 		for i, _ := range npcsAtLoc {
 			if npcsAtLoc[i].IsFound == false {
-				go func(i int) {
-					cc <- npcsAtLoc[i].Find()
-				}(i)
+				npcsAtLoc[i].IsFound = true
+				mc <- createMessage("Just ahead, you see a [" + npcsAtLoc[i].name + "].")
+			} else if npcsAtLoc[i].aggroDelay > 0 {
+				npcsAtLoc[i].aggroDelay--
+			} else {
+				npcsAtLoc[i].IsAttacking = true
 			}
 			if npcsAtLoc[i].IsAttacking == true {
-				go func(i int) {
-					cc <- npcsAtLoc[i].Attack(g)
-				}(i)
+				if npcsAtLoc[i].weaponDelayTimer == 0 {
+					npcsAtLoc[i].Attack(g, mc)
+					npcsAtLoc[i].weaponDelayTimer = npcsAtLoc[i].weaponDelay
+				} else {
+					npcsAtLoc[i].weaponDelayTimer--
+				}
 			}
+		}
+	}
+	if messagesAtLoc, ok := g.messagesByLoc[g.playerLoc]; ok {
+		for i, _ := range messagesAtLoc {
+			mc <- messagesAtLoc[i]
+		}
+		g.messagesByLoc[g.playerLoc] = nil
+	}
+	if g.playerIsAttacking == true {
+		if g.playerWeaponDelayTimer == 0 {
+			g.PlayerAttack(g.playerTarget, mc)
+			g.playerWeaponDelayTimer = g.playerWeaponDelay
+		} else {
+			g.playerWeaponDelayTimer--
 		}
 	}
 }
 
-// Game.****Item Methods
-const CAPACITY = "CAPACITY"
-const NOTFOUND = "NOTFOUND"
+func (g *Game) AddMessage(loc int, message Message) {
+	g.messagesByLoc[loc] = append(g.messagesByLoc[loc], message)
+}
+
+func (g *Game) InspectItem(name string, mc chan<- Message) {
+	item, ok := g.GetItem(g.playerLoc, name)
+	if ok == false {
+		item, ok = g.GetInventoryItem(name)
+	}
+	if ok {
+		mc <- createMessage("You inspect the " + item.name + ". " + item.description)
+	} else {
+		mc <- createMessage("There isn't anything by that name here. Maybe it's gone?")
+	}
+}
 
 func (g *Game) AddItem(loc int, item Item) {
 	g.itemsByLoc[loc] = append(g.itemsByLoc[loc], item)
@@ -85,35 +143,56 @@ func (g *Game) deleteItem(loc int, name string) {
 	g.itemsByLoc[loc] = newItems
 }
 
-func (g *Game) TakeItem(name string) (ok bool, err string) {
-	if item, _ok := g.GetItem(g.playerLoc, name); _ok {
-		if g.playerInventoryCapacity < len(g.playerInventory)+1 {
-			ok, err = false, CAPACITY
-		} else {
-			g.playerInventory[name] = item
-			ok = true
+func (g *Game) TakeItem(name string, mc chan<- Message) {
+	if item, ok := g.GetItem(g.playerLoc, name); ok {
+		if ok, _ := g.AddItemToInventory(item); ok {
 			g.deleteItem(g.playerLoc, name)
+			mc <- createMessage("You take the " + item.name + ".")
+		} else {
+			mc <- createMessage("You can't carry anything more.'")
 		}
 	} else {
-		ok, err = false, NOTFOUND
+		mc <- createMessage("There isn't anything by that name here. Maybe it's gone?")
+	}
+}
+
+func (g *Game) AddItemToInventory(item Item) (ok bool, err string) {
+	if g.playerInventoryCapacity < len(g.playerInventory)+1 {
+		ok, err = false, "capacity"
+	} else {
+		g.playerInventory[item.name] = item
+		ok = true
 	}
 	return
 }
 
-type Item struct {
-	name        string
-	description string
-	IsFound     bool
+func (g *Game) ListInventory(mc chan<- Message) {
+	mc <- createMessage(fmt.Sprint("Inventory Items(", len(g.playerInventory), "):"))
+	for _, item := range g.playerInventory {
+		mc <- createMessage("- " + item.name + " --- " + item.description)
+	}
 }
 
-func (item *Item) Find() Command {
-	item.IsFound = true
-	return Command{text: "/find " + item.name, origin: GAME}
-}
-
-// Game.****NPC Methods
 func (g *Game) AddNPC(loc int, npc NPC) {
 	g.npcsByLoc[loc] = append(g.npcsByLoc[loc], npc)
+}
+
+func (g *Game) deleteNPC(loc int, name string) {
+	var newNPCs []NPC
+	for _, npc := range g.npcsByLoc[loc] {
+		if npc.name != name {
+			newNPCs = append(newNPCs, npc)
+		}
+	}
+	g.npcsByLoc[loc] = newNPCs
+}
+
+func (g *Game) ConsiderNPC(name string, mc chan<- Message) {
+	if npc, ok := g.GetNPC(g.playerLoc, name); ok {
+		mc <- createMessage("You consider the " + name + ". " + npc.description)
+	} else {
+		mc <- createMessage("There isn't anything by that name here. Maybe it's gone?")
+	}
 }
 
 func (g *Game) GetNPC(loc int, name string) (npc NPC, ok bool) {
@@ -125,30 +204,56 @@ func (g *Game) GetNPC(loc int, name string) (npc NPC, ok bool) {
 	return NPC{}, false
 }
 
-type NPC struct {
-	name         string
-	description  string
-	IsFound      bool
-	IsAttacking  bool
-	weaponDamage int
+func (g *Game) ToggleAttack(name string, mc chan<- Message) {
+	if npc, ok := g.GetNPC(g.playerLoc, name); ok {
+		g.playerTarget = &npc
+		g.playerIsAttacking = true
+		// TODO use the inventory to change weapon damage!
+		// should reflect the item they chose earlier!
+		g.playerWeaponDamage = 10
+		g.playerWeaponDelay = 5
+		g.playerWeaponDelayTimer = 5
+	} else {
+		mc <- createMessage("There isn't anything by that name here. Maybe it's gone?")
+	}
 }
 
-func (npc *NPC) Find() Command {
-	npc.IsFound = true
-	go func() {
-		time.Sleep(6 * time.Second)
-		npc.IsAttacking = true
-	}()
-	return Command{text: "/find " + npc.name, origin: GAME}
-}
-
-func (npc *NPC) Attack(g *Game) Command {
-	dmg := npc.weaponDamage
-	g.playerHealth = g.playerHealth - dmg
-	if g.playerHealth > 0 {
-		return Command{text: fmt.Sprint("/attackByNPC ", dmg, " ", npc.name), origin: GAME}
+func (g *Game) PlayerAttack(npc *NPC, mc chan<- Message) {
+	dmg := rand.Intn(g.playerWeaponDamage)
+	npc.health = npc.health - dmg
+	if npc.health > 0 {
+		mc <- createMessage(fmt.Sprint("You hit a ", npc.name, " for ", dmg, " damage."))
 	} else {
 		npc.IsAttacking = false
-		return Command{text: fmt.Sprint("/deathByNPC ", dmg, " ", npc.name), origin: GAME}
+		g.playerIsAttacking = false
+		g.playerTarget = nil
+		g.deleteNPC(g.playerLoc, npc.name)
+		g.playerLoc++
+		mc <- createMessage(fmt.Sprint("You hit a ", npc.name, " for ", dmg, " damage AND DESTROY IT."))
+	}
+}
+
+type NPC struct {
+	name             string
+	description      string
+	health           int
+	IsFound          bool
+	aggroDelay       int
+	IsAttacking      bool
+	weaponDamage     int
+	weaponDelay      int
+	weaponDelayTimer int
+}
+
+func (npc *NPC) Attack(g *Game, mc chan<- Message) {
+	dmg := rand.Intn(npc.weaponDamage)
+	g.playerHealth = g.playerHealth - dmg
+	if g.playerHealth > 0 {
+		mc <- createMessage(fmt.Sprint("A ", npc.name, " hits your for ", dmg, " damage."))
+	} else {
+		npc.IsAttacking = false
+		g.playerIsAttacking = false
+		mc <- createMessage(fmt.Sprint("A ", npc.name, " hits your for ", dmg, " damage AND DESTROYS YOU."))
+		mc <- createMessage("Game over. Press Q to quit.")
 	}
 }
